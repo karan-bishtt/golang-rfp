@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Go App",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/rfp-quote-service/cmd/main.go", 
+            "env": {
+                "PORT": "8084"
+                // "ENV": "development"
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "buildFlags": "",
+            "showLog": true,
+            "dlvFlags": ["--check-go-version=false"]
+        }
+    ]
+}
