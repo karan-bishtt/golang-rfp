@@ -21,6 +21,9 @@ func SetupAuthRoutes() *mux.Router {
 	authRoutes.HandleFunc("/register-admin", authController.RegisterAdmin).Methods("POST")
 	authRoutes.HandleFunc("/login", authController.Login).Methods("POST")
 	authRoutes.HandleFunc("/users/{id:[0-9]+}", authController.GetVendorById).Methods("GET")
+	authRoutes.HandleFunc("/forgot-password", authController.ForgotPassword).Methods("POST")
+	authRoutes.HandleFunc("/reset-password", authController.ResetPassword).Methods("POST")
+	// Add these routes to your router
 
 	// Apply auth middleware to protected routes (not for /auth)
 

@@ -102,6 +102,21 @@ type UserPermission struct {
 	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
+// Add this new model for OTP management
+type PasswordResetOTP struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	Email     string    `json:"email" gorm:"not null;index"`
+	OTP       string    `json:"otp" gorm:"not null"`
+	Attempts  int       `json:"attempts" gorm:"default:0"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Add table name function
+func (PasswordResetOTP) TableName() string {
+	return "password_reset_otps"
+}
+
 // Table Names
 func (User) TableName() string {
 	return "users"

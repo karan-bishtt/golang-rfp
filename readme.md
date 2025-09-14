@@ -223,3 +223,67 @@ docker compose up -d --force-recreate
 
 
 This will apply new environment variables to your containers without touching your Postgres image or rebuilding Go services unnecessarily.
+
+
+NGNIX
+
+
+Use Nginx as reverse proxy (Recommended)
+
+Install Nginx:
+
+sudo apt install -y nginx
+sudo systemctl enable nginx
+sudo systemctl start nginx
+
+
+Configure reverse proxy for your services:
+
+sudo nano /etc/nginx/sites-available/golang-rfp
+
+
+Example config:
+
+server {
+    listen 80;
+    server_name golang-rfp.veldev.com;
+
+    location /auth/ {
+        proxy_pass http://localhost:8081/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /category/ {
+        proxy_pass http://localhost:8083/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /notification/ {
+        proxy_pass http://localhost:8082/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /rfp-quote/ {
+        proxy_pass http://localhost:8084/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+
+Enable the site:
+
+sudo ln -s /etc/nginx/sites-available/golang-rfp /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+
+
+Now your services are accessible via paths like:
+
+http://golang-rfp.veldev.com/auth/
+http://golang-rfp.veldev.com/category/
+http://golang-rfp.veldev.com/quote/
+

@@ -57,6 +57,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&models.VendorDetails{},
 		&models.Permission{},
 		&models.UserPermission{},
+		&models.PasswordResetOTP{},
 	)
 
 	if err != nil {

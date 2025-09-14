@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,17 @@ import (
 // region validators
 type AuthController struct {
 	notificationService *services.NotificationService
+}
+
+// Add these request structs
+type ForgotPasswordRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordRequest struct {
+	Email       string `json:"email" validate:"required,email"`
+	OTP         string `json:"otp" validate:"required,len=6"`
+	NewPassword string `json:"new_password" validate:"required,min=8"`
 }
 
 type RegisterVendorRequest struct {
@@ -153,6 +165,13 @@ func assignDefaultAdminPermissions(tx *gorm.DB, userID uint) error {
 		tx.Create(&userPermission)
 	}
 	return nil
+}
+
+// Helper function to generate 6-digit OTP
+func generateOTP() string {
+	b := make([]byte, 3)
+	rand.Read(b)
+	return fmt.Sprintf("%06d", int(b[0])<<16|int(b[1])<<8|int(b[2])%1000000)
 }
 
 // endregion helpers
@@ -653,4 +672,162 @@ func (ac *AuthController) ApproveVendor(w http.ResponseWriter, r *http.Request) 
 	ac.notificationService.SendEmail(email, subject, content)
 
 	respondWithJSON(w, 200, fmt.Sprintf("Vendor %s successfully", action), "", "", "", "", user)
+}
+
+// ForgotPassword - sends OTP to user's email
+func (ac *AuthController) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithJSON(w, 405, "Method not allowed", "", "", "", "", nil)
+		return
+	}
+
+	var req ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithJSON(w, 400, "Invalid request format", "", "", "", "", nil)
+		return
+	}
+
+	// Validate request
+	if err := utils.ValidateStruct(req); err != nil {
+		respondWithJSON(w, 400, err.Error(), "", "", "", "", nil)
+		return
+	}
+
+	// Check if user exists
+	var user models.User
+	if err := database.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		// Don't reveal if email exists or not for security
+		respondWithJSON(w, 200, "If the email exists, an OTP has been sent", "", "", "", "", nil)
+		return
+	}
+
+	// Delete any existing OTP for this email
+	database.DB.Where("email = ?", req.Email).Delete(&models.PasswordResetOTP{})
+
+	// Generate new OTP
+	otp := generateOTP()
+
+	// Save OTP to database
+	resetOTP := models.PasswordResetOTP{
+		Email:     req.Email,
+		OTP:       otp,
+		Attempts:  0,
+		ExpiresAt: time.Now().Add(15 * time.Minute), // OTP expires in 15 minutes
+	}
+
+	if err := database.DB.Create(&resetOTP).Error; err != nil {
+		respondWithJSON(w, 500, "Failed to process request", "", "", "", "", nil)
+		return
+	}
+
+	// Send OTP email
+	subject := "Password Reset OTP"
+	content := fmt.Sprintf(`
+		Hi %s,
+
+		You have requested to reset your password. Your OTP is:
+
+		%s
+
+		This OTP will expire in 15 minutes. Do not share this OTP with anyone.
+
+		If you did not request this, please ignore this email.
+	`, user.FirstName, otp)
+
+	go ac.notificationService.SendEmail(req.Email, subject, content)
+
+	respondWithJSON(w, 200, "If the email exists, an OTP has been sent", "", "", "", "", nil)
+}
+
+// ResetPassword - verifies OTP and updates password
+func (ac *AuthController) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithJSON(w, 405, "Method not allowed", "", "", "", "", nil)
+		return
+	}
+
+	var req ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithJSON(w, 400, "Invalid request format", "", "", "", "", nil)
+		return
+	}
+
+	// Validate request
+	if err := utils.ValidateStruct(req); err != nil {
+		respondWithJSON(w, 400, err.Error(), "", "", "", "", nil)
+		return
+	}
+
+	// Find OTP record
+	var resetOTP models.PasswordResetOTP
+	if err := database.DB.Where("email = ?", req.Email).First(&resetOTP).Error; err != nil {
+		respondWithJSON(w, 400, "Invalid or expired OTP", "", "", "", "", nil)
+		return
+	}
+
+	// Check if OTP has expired
+	if time.Now().After(resetOTP.ExpiresAt) {
+		database.DB.Delete(&resetOTP)
+		respondWithJSON(w, 400, "OTP has expired", "", "", "", "", nil)
+		return
+	}
+
+	// Check if attempts exceeded
+	if resetOTP.Attempts >= 3 {
+		database.DB.Delete(&resetOTP)
+		respondWithJSON(w, 400, "Too many failed attempts. Please request a new OTP", "", "", "", "", nil)
+		return
+	}
+
+	// Verify OTP
+	if resetOTP.OTP != req.OTP {
+		// Increment attempts
+		resetOTP.Attempts++
+		if resetOTP.Attempts >= 3 {
+			database.DB.Delete(&resetOTP)
+			respondWithJSON(w, 400, "Too many failed attempts. Please request a new OTP", "", "", "", "", nil)
+		} else {
+			database.DB.Save(&resetOTP)
+			remainingAttempts := 3 - resetOTP.Attempts
+			respondWithJSON(w, 400, fmt.Sprintf("Invalid OTP. %d attempts remaining", remainingAttempts), "", "", "", "", nil)
+		}
+		return
+	}
+
+	// OTP is valid, update password
+	var user models.User
+	if err := database.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		respondWithJSON(w, 400, "User not found", "", "", "", "", nil)
+		return
+	}
+
+	// Hash new password
+	hashedPassword, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		respondWithJSON(w, 500, "Failed to process password", "", "", "", "", nil)
+		return
+	}
+
+	// Update password
+	if err := database.DB.Model(&user).Update("password", hashedPassword).Error; err != nil {
+		respondWithJSON(w, 500, "Failed to update password", "", "", "", "", nil)
+		return
+	}
+
+	// Delete OTP record
+	database.DB.Delete(&resetOTP)
+
+	// Send confirmation email
+	subject := "Password Reset Successful"
+	content := fmt.Sprintf(`
+		Hi %s,
+
+		Your password has been successfully reset. You can now login with your new password.
+
+		If you did not make this change, please contact support immediately.
+	`, user.FirstName)
+
+	go ac.notificationService.SendEmail(req.Email, subject, content)
+
+	respondWithJSON(w, 200, "Password reset successful", "", "", "", "", nil)
 }
