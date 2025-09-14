@@ -171,7 +171,9 @@ func assignDefaultAdminPermissions(tx *gorm.DB, userID uint) error {
 func generateOTP() string {
 	b := make([]byte, 3)
 	rand.Read(b)
-	return fmt.Sprintf("%06d", int(b[0])<<16|int(b[1])<<8|int(b[2])%1000000)
+	otp := int(b[0])*3906 + int(b[1])*15 + int(b[2])/17
+	otp = otp%900000 + 100000 // ensures 6 digits: 100000-999999
+	return fmt.Sprintf("%06d", otp)
 }
 
 // endregion helpers
