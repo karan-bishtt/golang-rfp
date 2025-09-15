@@ -27,6 +27,7 @@ func main() {
 	// CORS options
 	handler := handlers.CORS(
 		handlers.AllowedOrigins([]string{"*"}), // OK because we are NOT using credentials
+		handlers.AllowCredentials(),
 		handlers.AllowedMethods([]string{
 			http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions,
 		}),
